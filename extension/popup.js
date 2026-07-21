@@ -1,7 +1,8 @@
-// Esperar a que el HTML cargue completamente
+// ⚠️ REEMPLAZA ESTA URL CON LA TUYA DE VERCEL (manteniendo el /api al final)
+const API_URL = 'https://visorseo.vercel.app/api';
+
 document.addEventListener('DOMContentLoaded', () => {
   
-  // Variable global para guardar la información del sitio activo
   let activeSiteData = {
     domain: '',
     fullUrl: ''
@@ -25,23 +26,78 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // 2. DETECTAR DOMINIO Y URL COMPLETA
+  // 2. DETECTAR DOMINIO ACTUAL EN CHROME
   // ==========================================
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const currentUrl = tabs[0].url;
     
     try {
       const urlObject = new URL(currentUrl);
-      
-      // Guardamos AMBOS datos en nuestro objeto
-      activeSiteData.domain = urlObject.hostname; // ej: ejemplo.com
-      activeSiteData.fullUrl = urlObject.href;     // ej: https://ejemplo.com/blog/articulo
+      activeSiteData.domain = urlObject.hostname;
+      activeSiteData.fullUrl = urlObject.href;
 
-      // Mostramos solo el dominio en el diseño para que se vea limpio
       document.getElementById('current-domain').textContent = activeSiteData.domain;
-
     } catch (error) {
       document.getElementById('current-domain').textContent = "Página no válida";
+    }
+  });
+
+  // ==========================================
+  // 3. CONSULTAR EL BACKEND (Fetch)
+  // ==========================================
+  const analyzeBtn = document.getElementById('btn-analyze');
+  const statusBadge = document.getElementById('status-badge');
+
+  analyzeBtn.addEventListener('click', async () => {
+    if (!activeSiteData.domain || activeSiteData.domain === "Página no válida") {
+      alert("No se puede analizar este tipo de pestaña.");
+      return;
+    }
+
+    // Cambiar estado visual mientras carga
+    statusBadge.textContent = "Analizando...";
+    analyzeBtn.disabled = true;
+    analyzeBtn.textContent = "Cargando métricas...";
+
+    try {
+      // Hacer la petición HTTP a Vercel pasando el dominio actual
+      const response = await fetch(`${API_URL}?domain=${activeSiteData.domain}`);
+      const data = await response.json();
+
+      if (data.status === "success") {
+        const m = data.metrics;
+
+        // Pestaña Autoridad
+        document.getElementById('da-val').textContent = m.autoridad.da;
+        document.getElementById('pa-val').textContent = m.autoridad.pa;
+        document.getElementById('dr-val').textContent = m.autoridad.dr;
+
+        // Pestaña Enlaces
+        document.getElementById('backlinks-val').textContent = m.enlaces.backlinks;
+        document.getElementById('ref-domains-val').textContent = m.enlaces.ref_domains;
+
+        // Pestaña Tráfico
+        document.getElementById('traffic-val').textContent = m.trafico.organic_traffic;
+        document.getElementById('keywords-val').textContent = m.trafico.keywords;
+
+        // Pestaña Riesgo
+        document.getElementById('spam-val').textContent = m.riesgo.spam_score;
+
+        // Pestaña Rendimiento
+        document.getElementById('speed-val').textContent = `${m.rendimiento.pagespeed} / 100`;
+        document.getElementById('onpage-val').textContent = `${m.rendimiento.seo_onpage} / 100`;
+
+        statusBadge.textContent = "Completado";
+      } else {
+        statusBadge.textContent = "Error";
+      }
+
+    } catch (error) {
+      console.error("Error al consultar el servidor:", error);
+      statusBadge.textContent = "Error servidor";
+    } finally {
+      analyzeBtn.disabled = false;
+      analyzeBtn.textContent = "Analizar Dominio";
     }
   });
 
