@@ -6,21 +6,67 @@ from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 
 def format_number(val):
-    """Convierte números grandes a formato legible (ej: 1500 -> 1.5K, 2000000 -> 2M)."""
     try:
         n = float(val)
-        if n >= 1_000_000:
-            return f"{n / 1_000_000:.1f}M"
-        elif n >= 1_000:
-            return f"{n / 1_000:.1f}K"
+        if n >= 1_000_000: return f"{n / 1_000_000:.1f}M"
+        elif n >= 1_000: return f"{n / 1_000:.1f}K"
         return str(int(n))
-    except (ValueError, TypeError):
-        return "--"
+    except (ValueError, TypeError): return "--"
+
+def fetch_pagespeed(domain, api_key):
+    if not api_key: return "--", "--"
+    try:
+        encoded_url = urllib.parse.quote(f"https://{domain}", safe='')
+        url = f"https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url={encoded_url}&key={api_key}&category=PERFORMANCE&category=SEO"
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+        
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            cats = data.get('lighthouseResult', {}).get('categories', {})
+            p_score = int(cats.get('performance', {}).get('score', 0) * 100)
+            s_score = int(cats.get('seo', {}).get('score', 0) * 100)
+            return p_score, s_score
+    except Exception as e:
+        print(f"Error PageSpeed: {e}")
+        return "--", "--"
+
+def fetch_rapidapi(domain, api_key):
+    metrics = {"da": "--", "pa": "--", "dr": "--", "backlinks": "--", "ref_domains": "--", "organic_traffic": "--", "keywords": "--", "spam_score": "--%"}
+    if not api_key: return metrics
+    try:
+        url = f"https://domain-metrics-check.p.rapidapi.com/domain-metrics/{domain}"
+        req = urllib.request.Request(url)
+        req.add_header('X-RapidAPI-Key', api_key)
+        req.add_header('X-RapidAPI-Host', 'domain-metrics-check.p.rapidapi.com')
+        req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            metrics["da"] = data.get('mozDA', '--')
+            metrics["pa"] = data.get('mozPA', '--')
+            metrics["dr"] = data.get('ahrefsDR', '--')
+            
+            rb = data.get('ahrefsBacklinks')
+            metrics["backlinks"] = format_number(rb) if rb is not None else "--"
+            
+            rd = data.get('ahrefsRefDomains')
+            metrics["ref_domains"] = format_number(rd) if rd is not None else "--"
+            
+            rt = data.get('ahrefsTraffic')
+            metrics["organic_traffic"] = f"{format_number(rt)}/mes" if rt is not None else "--"
+            
+            rk = data.get('ahrefsOrganicKeywords')
+            metrics["keywords"] = format_number(rk) if rk is not None else "--"
+            
+            rs = data.get('mozSpam')
+            metrics["spam_score"] = f"{rs}%" if rs is not None else "--%"
+    except Exception as e:
+        print(f"Error RapidAPI: {e}")
+    return metrics
 
 class handler(BaseHTTPRequestHandler):
-
     def do_GET(self):
-        # 1. Configurar encabezados CORS
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -28,120 +74,26 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
-        # 2. Capturar el dominio que envía la extensión
         parsed_path = urlparse(self.path)
         params = parse_qs(parsed_path.query)
-        target_domain = params.get('domain', [''])[0]
+        target_domain = params.get('domain', [''])[0].replace('www.', '')
+        req_type = params.get('type', ['seo'])[0] # Puede ser 'seo' o 'speed'
 
         if not target_domain:
-            self.wfile.write(json.dumps({"status": "error", "message": "Dominio requerido"}).encode('utf-8'))
+            self.wfile.write(json.dumps({"status": "error"}).encode('utf-8'))
             return
 
-        # 3. Leer las claves de Vercel
         rapidapi_key = os.environ.get('RAPIDAPI_KEY', '')
         pagespeed_key = os.environ.get('PAGESPEED_API_KEY', '')
 
-        # ----------------------------------------------------
-        # A) CONSULTA A GOOGLE PAGESPEED INSIGHTS
-        # ----------------------------------------------------
-        pagespeed_score = "--"
-        seo_onpage_score = "--"
+        response_payload = {"status": "success", "domain": target_domain, "metrics": {}}
 
-        if pagespeed_key:
-            try:
-                encoded_url = urllib.parse.quote(f"https://{target_domain}")
-                ps_url = f"https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url={encoded_url}&key={pagespeed_key}&category=PERFORMANCE&category=SEO"
-                
-                req_ps = urllib.request.Request(ps_url)
-                with urllib.request.urlopen(req_ps, timeout=10) as resp:
-                    ps_data = json.loads(resp.read().decode('utf-8'))
-                    cats = ps_data.get('lighthouseResult', {}).get('categories', {})
-                    
-                    perf = cats.get('performance', {}).get('score')
-                    seo_cat = cats.get('seo', {}).get('score')
-
-                    if perf is not None:
-                        pagespeed_score = int(perf * 100)
-                    if seo_cat is not None:
-                        seo_onpage_score = int(seo_cat * 100)
-            except Exception as e:
-                print(f"Error en PageSpeed: {e}")
-
-        # ----------------------------------------------------
-        # B) CONSULTA A DOMAIN METRICS CHECK (RAPIDAPI)
-        # ----------------------------------------------------
-        da_val, pa_val, dr_val = "--", "--", "--"
-        backlinks_val, ref_domains_val = "--", "--"
-        traffic_val, keywords_val = "--", "--"
-        spam_val = "--%"
-
-        if rapidapi_key:
-            try:
-                rapid_url = f"https://domain-metrics-check.p.rapidapi.com/domain-metrics/{target_domain}"
-                req_rapid = urllib.request.Request(rapid_url)
-                
-                # Encabezados requeridos por RapidAPI
-                req_rapid.add_header('X-RapidAPI-Key', rapidapi_key)
-                req_rapid.add_header('X-RapidAPI-Host', 'domain-metrics-check.p.rapidapi.com')
-
-                with urllib.request.urlopen(req_rapid, timeout=10) as resp:
-                    api_data = json.loads(resp.read().decode('utf-8'))
-
-                    # Extraer métricas de Autoridad
-                    da_val = api_data.get('mozDA', '--')
-                    pa_val = api_data.get('mozPA', '--')
-                    dr_val = api_data.get('ahrefsDR', '--')
-
-                    # Extraer métricas de Enlaces y formatearlas (ej: 29.2M)
-                    raw_backlinks = api_data.get('ahrefsBacklinks')
-                    backlinks_val = format_number(raw_backlinks) if raw_backlinks is not None else "--"
-                    
-                    raw_ref_domains = api_data.get('ahrefsRefDomains')
-                    ref_domains_val = format_number(raw_ref_domains) if raw_ref_domains is not None else "--"
-
-                    # Extraer métricas de Tráfico
-                    raw_traffic = api_data.get('ahrefsTraffic')
-                    traffic_val = f"{format_number(raw_traffic)}/mes" if raw_traffic is not None else "--"
-
-                    raw_keywords = api_data.get('ahrefsOrganicKeywords')
-                    keywords_val = format_number(raw_keywords) if raw_keywords is not None else "--"
-
-                    # Extraer Spam Score
-                    raw_spam = api_data.get('mozSpam')
-                    spam_val = f"{raw_spam}%" if raw_spam is not None else "--%"
-
-            except Exception as e:
-                print(f"Error en RapidAPI: {e}")
-
-        # ----------------------------------------------------
-        # C) CONSTRUIR Y DEVOLVER LA RESPUESTA FINAL
-        # ----------------------------------------------------
-        response_payload = {
-            "status": "success",
-            "domain": target_domain,
-            "metrics": {
-                "autoridad": {
-                    "da": da_val,
-                    "pa": pa_val,
-                    "dr": dr_val
-                },
-                "enlaces": {
-                    "backlinks": backlinks_val,
-                    "ref_domains": ref_domains_val
-                },
-                "trafico": {
-                    "organic_traffic": traffic_val,
-                    "keywords": keywords_val
-                },
-                "riesgo": {
-                    "spam_score": spam_val
-                },
-                "rendimiento": {
-                    "pagespeed": pagespeed_score,
-                    "seo_onpage": seo_onpage_score
-                }
-            }
-        }
+        # El servidor ahora decide qué ejecutar según lo que pida la extensión
+        if req_type == 'speed':
+            ps, seo = fetch_pagespeed(target_domain, pagespeed_key)
+            response_payload["metrics"] = {"pagespeed": ps, "seo_onpage": seo}
+        else:
+            response_payload["metrics"] = fetch_rapidapi(target_domain, rapidapi_key)
 
         self.wfile.write(json.dumps(response_payload).encode('utf-8'))
         return
