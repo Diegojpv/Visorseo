@@ -5,6 +5,18 @@ import urllib.parse
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 
+def format_number(val):
+    """Convierte números grandes a formato legible (ej: 1500 -> 1.5K, 2000000 -> 2M)."""
+    try:
+        n = float(val)
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        elif n >= 1_000:
+            return f"{n / 1_000:.1f}K"
+        return str(int(n))
+    except (ValueError, TypeError):
+        return "--"
+
 class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
@@ -16,7 +28,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
-        # 2. Extraer el dominio enviado desde el Frontend
+        # 2. Capturar el dominio que envía la extensión
         parsed_path = urlparse(self.path)
         params = parse_qs(parsed_path.query)
         target_domain = params.get('domain', [''])[0]
@@ -25,12 +37,12 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"status": "error", "message": "Dominio requerido"}).encode('utf-8'))
             return
 
-        # 3. Leer las llaves secretas de las Variables de Entorno en Vercel
+        # 3. Leer las claves de Vercel
         rapidapi_key = os.environ.get('RAPIDAPI_KEY', '')
         pagespeed_key = os.environ.get('PAGESPEED_API_KEY', '')
 
         # ----------------------------------------------------
-        # A) CONSULTA REAL A GOOGLE PAGESPEED INSIGHTS API
+        # A) CONSULTA A GOOGLE PAGESPEED INSIGHTS
         # ----------------------------------------------------
         pagespeed_score = "--"
         seo_onpage_score = "--"
@@ -38,35 +50,72 @@ class handler(BaseHTTPRequestHandler):
         if pagespeed_key:
             try:
                 encoded_url = urllib.parse.quote(f"https://{target_domain}")
-                ps_endpoint = f"https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url={encoded_url}&key={pagespeed_key}&category=PERFORMANCE&category=SEO"
+                ps_url = f"https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url={encoded_url}&key={pagespeed_key}&category=PERFORMANCE&category=SEO"
                 
-                req = urllib.request.Request(ps_endpoint)
-                with urllib.request.urlopen(req, timeout=12) as response:
-                    ps_data = json.loads(response.read().decode('utf-8'))
+                req_ps = urllib.request.Request(ps_url)
+                with urllib.request.urlopen(req_ps, timeout=10) as resp:
+                    ps_data = json.loads(resp.read().decode('utf-8'))
+                    cats = ps_data.get('lighthouseResult', {}).get('categories', {})
                     
-                    # Google devuelve scores decimales de 0 a 1 (ej: 0.85 -> 85)
-                    perf = ps_data.get('lighthouseResult', {}).get('categories', {}).get('performance', {}).get('score')
-                    seo_cat = ps_data.get('lighthouseResult', {}).get('categories', {}).get('seo', {}).get('score')
-                    
+                    perf = cats.get('performance', {}).get('score')
+                    seo_cat = cats.get('seo', {}).get('score')
+
                     if perf is not None:
                         pagespeed_score = int(perf * 100)
                     if seo_cat is not None:
                         seo_onpage_score = int(seo_cat * 100)
             except Exception as e:
-                print(f"Error consultando PageSpeed: {e}")
+                print(f"Error en PageSpeed: {e}")
 
         # ----------------------------------------------------
-        # B) CONSULTA A RAPIDAPI (Moz / Ahrefs)
+        # B) CONSULTA A DOMAIN METRICS CHECK (RAPIDAPI)
         # ----------------------------------------------------
         da_val, pa_val, dr_val = "--", "--", "--"
         backlinks_val, ref_domains_val = "--", "--"
         traffic_val, keywords_val = "--", "--"
         spam_val = "--%"
 
-        # Aquí Python usará rapidapi_key enviándola en la cabecera 'X-RapidAPI-Key'
-        # cuando configures la llamada al endpoint específico de tu suscripción en RapidAPI.
+        if rapidapi_key:
+            try:
+                rapid_url = f"https://domain-metrics-check.p.rapidapi.com/domain-metrics/{target_domain}"
+                req_rapid = urllib.request.Request(rapid_url)
+                
+                # Encabezados requeridos por RapidAPI
+                req_rapid.add_header('X-RapidAPI-Key', rapidapi_key)
+                req_rapid.add_header('X-RapidAPI-Host', 'domain-metrics-check.p.rapidapi.com')
 
-        # 4. Estructurar la respuesta JSON para la extensión
+                with urllib.request.urlopen(req_rapid, timeout=10) as resp:
+                    api_data = json.loads(resp.read().decode('utf-8'))
+
+                    # Extraer métricas de Autoridad
+                    da_val = api_data.get('mozDA', '--')
+                    pa_val = api_data.get('mozPA', '--')
+                    dr_val = api_data.get('ahrefsDR', '--')
+
+                    # Extraer métricas de Enlaces y formatearlas (ej: 29.2M)
+                    raw_backlinks = api_data.get('ahrefsBacklinks')
+                    backlinks_val = format_number(raw_backlinks) if raw_backlinks is not None else "--"
+                    
+                    raw_ref_domains = api_data.get('ahrefsRefDomains')
+                    ref_domains_val = format_number(raw_ref_domains) if raw_ref_domains is not None else "--"
+
+                    # Extraer métricas de Tráfico
+                    raw_traffic = api_data.get('ahrefsTraffic')
+                    traffic_val = f"{format_number(raw_traffic)}/mes" if raw_traffic is not None else "--"
+
+                    raw_keywords = api_data.get('ahrefsOrganicKeywords')
+                    keywords_val = format_number(raw_keywords) if raw_keywords is not None else "--"
+
+                    # Extraer Spam Score
+                    raw_spam = api_data.get('mozSpam')
+                    spam_val = f"{raw_spam}%" if raw_spam is not None else "--%"
+
+            except Exception as e:
+                print(f"Error en RapidAPI: {e}")
+
+        # ----------------------------------------------------
+        # C) CONSTRUIR Y DEVOLVER LA RESPUESTA FINAL
+        # ----------------------------------------------------
         response_payload = {
             "status": "success",
             "domain": target_domain,
