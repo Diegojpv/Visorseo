@@ -25,7 +25,7 @@ def fetch_rapidapi(domain, api_key):
         clean_domain = quote(domain.strip())
         
         # 2. ENDPOINT: Usamos el de la documentación
-        url = f"https://domain-metrics-check.p.rapidapi.com/domain-metrics/{clean_domain}"
+        url = f"https://domain-metrics-check.p.rapidapi.com/domain-metrics?domain={clean_domain}"
         
         req = urllib.request.Request(url)
         
