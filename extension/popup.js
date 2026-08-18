@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   // ==========================================
-  // 1. LÓGICA DE LAS PESTAÑAS (Tabs)[cite: 1]
+  // 1. LÓGICA DE LAS PESTAÑAS (Tabs)
   // ==========================================
   const tabButtons = document.querySelectorAll('.tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // 2. DETECTAR DOMINIO ACTUAL EN CHROME[cite: 1]
+  // 2. DETECTAR DOMINIO ACTUAL EN CHROME
   // ==========================================
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const currentUrl = tabs[0].url;
@@ -42,23 +42,23 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ==========================================
-  // 3. CONSULTAR EL BACKEND ASÍNCRONO
+  // 3. CONSULTAR EL BACKEND (Fetch Doble / Asíncrono)
   // ==========================================
-  const analyzeBtn = document.getElementById('btn-analyze');[cite: 1]
-  const statusBadge = document.getElementById('status-badge');[cite: 1]
+  const analyzeBtn = document.getElementById('btn-analyze');
+  const statusBadge = document.getElementById('status-badge');
 
-  analyzeBtn.addEventListener('click', async () => {
+  analyzeBtn.addEventListener('click', () => {
     if (!activeSiteData.domain || activeSiteData.domain === "Página no válida") {
       alert("No se puede analizar este tipo de pestaña.");
       return;
     }
 
-    // Cambiar estado visual inicial mientras carga RapidAPI
+    // --- PREPARAR LA UI (Interfaz) ---
     statusBadge.textContent = "Analizando...";
     analyzeBtn.disabled = true;
-    analyzeBtn.textContent = "Cargando SEO...";
+    analyzeBtn.textContent = "Cargando métricas...";
 
-    // Colocar indicadores de carga temporales en las métricas de SEO[cite: 1]
+    // Ponemos puntos suspensivos en los campos rápidos
     document.getElementById('da-val').textContent = "...";
     document.getElementById('pa-val').textContent = "...";
     document.getElementById('dr-val').textContent = "...";
@@ -67,62 +67,62 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('traffic-val').textContent = "...";
     document.getElementById('keywords-val').textContent = "...";
     document.getElementById('spam-val').textContent = "...";
-    
-    // Indicar al usuario que Google PageSpeed tardará un poco más
+
+    // Dejamos muy claro que PageSpeed tardará
     document.getElementById('speed-val').textContent = "⏳ Calculando...";
     document.getElementById('onpage-val').textContent = "⏳ Calculando...";
 
-    // Petición A: Métricas rápidas de SEO (RapidAPI)
-    const fetchSeoData = fetch(`${API_URL}?domain=${activeSiteData.domain}&type=seo`)
-      .then(res => res.json())
+    // --- PETICIÓN A (Rápida): Solicitar métricas de SEO a RapidAPI ---
+    fetch(`${API_URL}?domain=${activeSiteData.domain}&type=seo`)
+      .then(response => response.json())
       .then(data => {
         if (data.status === "success") {
           const m = data.metrics;
-          document.getElementById('da-val').textContent = m.da;[cite: 1]
-          document.getElementById('pa-val').textContent = m.pa;[cite: 1]
-          document.getElementById('dr-val').textContent = m.dr;[cite: 1]
-          document.getElementById('backlinks-val').textContent = m.backlinks;[cite: 1]
-          document.getElementById('ref-domains-val').textContent = m.ref_domains;[cite: 1]
-          document.getElementById('traffic-val').textContent = m.organic_traffic;[cite: 1]
-          document.getElementById('keywords-val').textContent = m.keywords;[cite: 1]
-          document.getElementById('spam-val').textContent = m.spam_score;[cite: 1]
-          
-          statusBadge.textContent = "SEO listo";
+          // Pestañas SEO: Se llenan casi de inmediato
+          document.getElementById('da-val').textContent = m.da || "--";
+          document.getElementById('pa-val').textContent = m.pa || "--";
+          document.getElementById('dr-val').textContent = m.dr || "--";
+          document.getElementById('backlinks-val').textContent = m.backlinks || "--";
+          document.getElementById('ref-domains-val').textContent = m.ref_domains || "--";
+          document.getElementById('traffic-val').textContent = m.organic_traffic || "--";
+          document.getElementById('keywords-val').textContent = m.keywords || "--";
+          document.getElementById('spam-val').textContent = m.spam_score || "--%";
+
+          // Actualizamos los textos para avisar que falta Google
           analyzeBtn.textContent = "Midiendo Velocidad...";
-        } else {
-          statusBadge.textContent = "Error SEO";
+          statusBadge.textContent = "Midiendo...";
         }
       })
-      .catch(err => {
-        console.error("Error SEO:", err);
-        statusBadge.textContent = "Error servidor";
+      .catch(error => {
+        console.error("Error cargando SEO:", error);
       });
 
-    // Petición B: Rendimiento pesado (Google PageSpeed)
-    const fetchSpeedData = fetch(`${API_URL}?domain=${activeSiteData.domain}&type=speed`)
-      .then(res => res.json())
+    // --- PETICIÓN B (Lenta): Solicitar velocidad a Google PageSpeed ---
+    fetch(`${API_URL}?domain=${activeSiteData.domain}&type=speed`)
+      .then(response => response.json())
       .then(data => {
         if (data.status === "success") {
           const m = data.metrics;
-          document.getElementById('speed-val').textContent = `${m.pagespeed} / 100`;[cite: 1]
-          document.getElementById('onpage-val').textContent = `${m.seo_onpage} / 100`;[cite: 1]
+          // Pestaña Rendimiento: Se llena cuando Google termine
+          document.getElementById('speed-val').textContent = `${m.pagespeed} / 100`;
+          document.getElementById('onpage-val').textContent = `${m.seo_onpage} / 100`;
         } else {
-          document.getElementById('speed-val').textContent = "Error";[cite: 1]
-          document.getElementById('onpage-val').textContent = "Error";[cite: 1]
+          document.getElementById('speed-val').textContent = "Error";
+          document.getElementById('onpage-val').textContent = "Error";
         }
       })
-      .catch(err => {
-        console.error("Error PageSpeed:", err);
-        document.getElementById('speed-val').textContent = "Error";[cite: 1]
-        document.getElementById('onpage-val').textContent = "Error";[cite: 1]
+      .catch(error => {
+        console.error("Error cargando PageSpeed:", error);
+        document.getElementById('speed-val').textContent = "Error";
+        document.getElementById('onpage-val').textContent = "Error";
+      })
+      .finally(() => {
+        // Pase lo que pase (éxito o error), liberamos los botones al final
+        statusBadge.textContent = "Completado";
+        analyzeBtn.textContent = "Analizar Dominio";
+        analyzeBtn.disabled = false;
       });
 
-    // Esperar a que ambas peticiones concluyan para liberar el botón por completo
-    await Promise.allSettled([fetchSeoData, fetchSpeedData]);
-    
-    statusBadge.textContent = "Completado";[cite: 1]
-    analyzeBtn.disabled = false;
-    analyzeBtn.textContent = "Analizar Dominio";[cite: 1]
   });
 
 });
