@@ -21,18 +21,18 @@ def fetch_rapidapi(domain, api_key):
         return metrics
         
     try:
-        # 1. LIMPIEZA ABSOLUTA: Quitamos espacios ocultos y codificamos el texto
+       # 1. LIMPIEZA ABSOLUTA
         clean_domain = quote(domain.strip())
         
-        # 2. ENDPOINT: Usamos el de la documentación
-        url = f"https://domain-metrics-check.p.rapidapi.com/domain-metrics?domain={clean_domain}"
+        # 2. ENDPOINT: ¡Añadimos la barra diagonal '/' al final justo como en el snippet!
+        url = f"https://domain-metrics-check.p.rapidapi.com/domain-metrics/{clean_domain}/"
         
         req = urllib.request.Request(url)
         
-        # 3. CABECERAS ANTI-BLOQUEO: Simulamos ser Chrome y pedimos JSON explícitamente
-        req.add_header('X-RapidAPI-Key', api_key)
-        req.add_header('X-RapidAPI-Host', 'domain-metrics-check.p.rapidapi.com')
-        req.add_header('Accept', 'application/json')
+        # 3. CABECERAS: Exactamente como el snippet, más el User-Agent por seguridad
+        req.add_header('x-rapidapi-key', api_key)
+        req.add_header('x-rapidapi-host', 'domain-metrics-check.p.rapidapi.com')
+        req.add_header('Content-Type', 'application/json')
         req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
         with urllib.request.urlopen(req, timeout=15) as resp:
