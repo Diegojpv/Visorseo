@@ -1,6 +1,7 @@
 import json
 import os
 import urllib.request
+import urllib.error
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 
@@ -13,8 +14,13 @@ def format_number(val):
     except (ValueError, TypeError): return "--"
 
 def fetch_rapidapi(domain, api_key):
-    metrics = {"da": "--", "pa": "--", "dr": "--", "backlinks": "--", "ref_domains": "--", "organic_traffic": "--", "keywords": "--", "spam_score": "--%"}
-    if not api_key: return metrics
+    # Añadimos un campo "debug_info" para atrapar el error real
+    metrics = {"da": "--", "pa": "--", "dr": "--", "backlinks": "--", "ref_domains": "--", "organic_traffic": "--", "keywords": "--", "spam_score": "--%", "debug_info": ""}
+    
+    if not api_key: 
+        metrics["debug_info"] = "ERROR: Vercel no está leyendo la API_KEY."
+        return metrics
+        
     try:
         url = f"https://domain-metrics-check.p.rapidapi.com/domain-metrics/{domain}"
         req = urllib.request.Request(url)
@@ -23,7 +29,12 @@ def fetch_rapidapi(domain, api_key):
         req.add_header('User-Agent', 'Mozilla/5.0')
 
         with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
+            raw_response = resp.read().decode('utf-8')
+            data = json.loads(raw_response)
+            
+            # Guardamos un extracto de lo que RapidAPI responde para verlo con nuestros propios ojos
+            metrics["debug_info"] = f"EXITO. RapidAPI respondió: {raw_response[:150]}..."
+            
             metrics["da"] = data.get('mozDA', '--')
             metrics["pa"] = data.get('mozPA', '--')
             metrics["dr"] = data.get('ahrefsDR', '--')
@@ -42,8 +53,14 @@ def fetch_rapidapi(domain, api_key):
             
             rs = data.get('mozSpam')
             metrics["spam_score"] = f"{rs}%" if rs is not None else "--%"
+            
+    except urllib.error.HTTPError as e:
+        # Si RapidAPI rechaza la petición (ej. Error 403, 401, 404), atrapamos el mensaje exacto
+        error_body = e.read().decode('utf-8')
+        metrics["debug_info"] = f"ERROR HTTP {e.code}: {error_body}"
     except Exception as e:
-        print(f"Error RapidAPI: {e}")
+        metrics["debug_info"] = f"ERROR GENERAL: {str(e)}"
+        
     return metrics
 
 class handler(BaseHTTPRequestHandler):
