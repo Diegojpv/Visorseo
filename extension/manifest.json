@@ -2,12 +2,22 @@
   "manifest_version": 3,
   "name": "Visorseo - Análisis SEO gratis de páginas web",
   "version": "1.0.0",
-  "description": "Visualiza estadísticas SEO en tiempo real: DA/PA de Moz, DR de Ahrefs, backlinks, tráfico, Spam Score y Puntuaciones de rendimiento.",
+  "description": "Visualiza estadísticas SEO en tiempo real: DA/PA de Moz, DR de Ahrefs, backlinks, tráfico y Spam Score.",
   "permissions": [
-    "activeTab"
+    "activeTab",
+    "storage"
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   }
 }
-
