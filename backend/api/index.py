@@ -4,6 +4,7 @@ import urllib.request
 import urllib.error
 from urllib.parse import parse_qs, urlparse, quote
 from http.server import BaseHTTPRequestHandler
+import concurrent.futures
 
 def format_number(val):
     try:
@@ -13,39 +14,27 @@ def format_number(val):
         return str(int(n))
     except (ValueError, TypeError): return "--"
 
-def fetch_rapidapi(domain, api_key):
-    metrics = {"da": "--", "pa": "--", "dr": "--", "backlinks": "--", "ref_domains": "--", "organic_traffic": "--", "keywords": "--", "spam_score": "--%", "debug_info": ""}
+def fetch_primary_metrics(domain, api_key):
+    """API Original (Extrae DA, PA, Enlaces y Tráfico)"""
+    metrics = {"da": "--", "pa": "--", "dr": "--", "backlinks": "--", "ref_domains": "--", "organic_traffic": "--", "keywords": "--"}
     
-    if not api_key: 
-        metrics["debug_info"] = "ERROR: Vercel no está leyendo la API_KEY."
-        return metrics
+    if not api_key: return {k: "Error" for k in metrics}
         
     try:
-       # 1. LIMPIEZA ABSOLUTA
         clean_domain = quote(domain.strip())
-        
-        # 2. ENDPOINT: ¡Añadimos la barra diagonal '/' al final justo como en el snippet!
         url = f"https://domain-metrics-check.p.rapidapi.com/domain-metrics/{clean_domain}/"
         
         req = urllib.request.Request(url)
-        
-        # 3. CABECERAS: Exactamente como el snippet, más el User-Agent por seguridad
         req.add_header('x-rapidapi-key', api_key)
+        # HOST DE LA API ANTIGUA
         req.add_header('x-rapidapi-host', 'domain-metrics-check.p.rapidapi.com')
         req.add_header('Content-Type', 'application/json')
-        req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        req.add_header('User-Agent', 'Mozilla/5.0')
 
         with urllib.request.urlopen(req, timeout=15) as resp:
-            raw_response = resp.read().decode('utf-8')
-            data = json.loads(raw_response)
-            
-            # Verificamos si la API procesó el request pero decidió enviar un mensaje de error
-            if isinstance(data, dict) and data.get("status") == "error":
-                metrics["debug_info"] = f"RECHAZADO POR LA API: {data.get('message')}"
-                return metrics
+            data = json.loads(resp.read().decode('utf-8'))
+            if isinstance(data, dict) and data.get("status") == "error": raise Exception()
                 
-            metrics["debug_info"] = f"EXITO: Datos recibidos correctamente."
-            
             metrics["da"] = data.get('mozDA', '--')
             metrics["pa"] = data.get('mozPA', '--')
             metrics["dr"] = data.get('ahrefsDR', '--')
@@ -62,14 +51,39 @@ def fetch_rapidapi(domain, api_key):
             rk = data.get('ahrefsOrganicKeywords')
             metrics["keywords"] = format_number(rk) if rk is not None else "--"
             
-            rs = data.get('mozSpam')
-            metrics["spam_score"] = f"{rs}%" if rs is not None else "--%"
+    except Exception:
+        return {k: "Error" for k in metrics}
+        
+    return metrics
+
+def fetch_moz_spam(domain, api_key):
+    """NUEVA API DE MOZ (Extrae SÓLO el Spam Score)"""
+    metrics = {"spam_score": "--%"}
+    
+    if not api_key: return {"spam_score": "Error"}
+        
+    try:
+        url = "https://moz-da-pa1.p.rapidapi.com/v1/getDaPa"
+        body = json.dumps({"q": domain.strip()}).encode('utf-8')
+        
+        req = urllib.request.Request(url, data=body, method='POST')
+        req.add_header('x-rapidapi-key', api_key)
+        # HOST DE LA NUEVA API DE MOZ (De tus capturas)
+        req.add_header('x-rapidapi-host', 'moz-da-pa1.p.rapidapi.com')
+        req.add_header('Content-Type', 'application/json')
+
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            spam = data.get("spam_score")
             
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8')
-        metrics["debug_info"] = f"ERROR HTTP {e.code}: {error_body}"
-    except Exception as e:
-        metrics["debug_info"] = f"ERROR GENERAL: {str(e)}"
+            # Controlamos el -1 que mencionaste
+            if spam is None or spam == -1 or str(spam) == "-1":
+                metrics["spam_score"] = "N/D"
+            else:
+                metrics["spam_score"] = f"{spam}%"
+                
+    except Exception:
+        metrics["spam_score"] = "Error"
         
     return metrics
 
@@ -88,12 +102,24 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"status": "error", "message": "Falta el dominio"}).encode('utf-8'))
             return
 
+        # Aquí leemos tu clave secreta desde Vercel de forma segura
         rapidapi_key = os.environ.get('RAPIDAPI_KEY', '')
         
+        # Ejecutamos ambas consultas a RapidAPI al mismo tiempo (Concurrencia)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_primary = executor.submit(fetch_primary_metrics, target_domain, rapidapi_key)
+            future_moz = executor.submit(fetch_moz_spam, target_domain, rapidapi_key)
+            
+            primary_metrics = future_primary.result()
+            moz_metrics = future_moz.result()
+
+        # Combinamos los datos en un solo JSON
+        combined_metrics = {**primary_metrics, **moz_metrics}
+
         response_payload = {
             "status": "success", 
             "domain": target_domain, 
-            "metrics": fetch_rapidapi(target_domain, rapidapi_key)
+            "metrics": combined_metrics
         }
 
         self.wfile.write(json.dumps(response_payload).encode('utf-8'))
