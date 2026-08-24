@@ -57,10 +57,14 @@ def fetch_primary_metrics(domain, api_key):
     return metrics
 
 def fetch_moz_spam(domain, api_key):
-    """NUEVA API DE MOZ (Extrae SÓLO el Spam Score)"""
-    metrics = {"spam_score": "--%"}
+    """NUEVA API DE MOZ (Extrae SÓLO el Spam Score con Debug)"""
+    # Agregamos 'debug_spam' para leer el error real
+    metrics = {"spam_score": "--%", "debug_spam": ""}
     
-    if not api_key: return {"spam_score": "Error"}
+    if not api_key: 
+        metrics["spam_score"] = "Error"
+        metrics["debug_spam"] = "Falta la API Key"
+        return metrics
         
     try:
         url = "https://moz-da-pa1.p.rapidapi.com/v1/getDaPa"
@@ -68,7 +72,6 @@ def fetch_moz_spam(domain, api_key):
         
         req = urllib.request.Request(url, data=body, method='POST')
         req.add_header('x-rapidapi-key', api_key)
-        # HOST DE LA NUEVA API DE MOZ (De tus capturas)
         req.add_header('x-rapidapi-host', 'moz-da-pa1.p.rapidapi.com')
         req.add_header('Content-Type', 'application/json')
 
@@ -76,14 +79,21 @@ def fetch_moz_spam(domain, api_key):
             data = json.loads(resp.read().decode('utf-8'))
             spam = data.get("spam_score")
             
-            # Controlamos el -1 que mencionaste
             if spam is None or spam == -1 or str(spam) == "-1":
                 metrics["spam_score"] = "N/D"
+                metrics["debug_spam"] = "Éxito, pero la API devolvió -1"
             else:
                 metrics["spam_score"] = f"{spam}%"
+                metrics["debug_spam"] = "Éxito"
                 
-    except Exception:
+    except urllib.error.HTTPError as e:
+        # Aquí capturamos el mensaje exacto de rechazo de RapidAPI
+        error_body = e.read().decode('utf-8')
         metrics["spam_score"] = "Error"
+        metrics["debug_spam"] = f"HTTP {e.code}: {error_body}"
+    except Exception as e:
+        metrics["spam_score"] = "Error"
+        metrics["debug_spam"] = f"Error interno: {str(e)}"
         
     return metrics
 
