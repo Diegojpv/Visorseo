@@ -73,7 +73,11 @@ def fetch_moz_spam(domain, api_key):
         req = urllib.request.Request(url, data=body, method='POST')
         req.add_header('x-rapidapi-key', api_key)
         req.add_header('x-rapidapi-host', 'moz-da-pa1.p.rapidapi.com')
+        
+        # Cabeceras estándar requeridas por Cloudflare para tráfico de APIs
         req.add_header('Content-Type', 'application/json')
+        req.add_header('Accept', 'application/json')
+        req.add_header('User-Agent', 'axios/1.6.2')
 
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode('utf-8'))
